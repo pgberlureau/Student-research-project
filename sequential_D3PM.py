@@ -2,6 +2,7 @@ import networkx as nx
 import matplotlib.pyplot as plt
 import torch
 from torch import nn
+import numpy as np
 from torchvision.ops import MLP
 import torch_geometric
 from torch_geometric.data import Data, Dataset
@@ -14,6 +15,7 @@ from copy import deepcopy
 import os
 import os.path as osp
 from tqdm import tqdm
+from itertools import combinations
 
 def wilson_algorithm(G, start):
     """
@@ -89,7 +91,7 @@ def write_ust_maze_list(L, dir_name):
     for i, G in enumerate(L):
         nx.write_gml(G, dir_name+"/Graph_"+str(i), stringizer=nx.readwrite.gml.literal_stringizer)
 
-def draw_maze(T, width, height):
+def draw_maze(T, width, height, title):
     """
     Draw the maze represented by the uniform spanning tree T.
 
@@ -105,9 +107,9 @@ def draw_maze(T, width, height):
     plt.xlim(-1, width)
     plt.ylim(-1, height)
     plt.gca().invert_yaxis()
-    plt.show()
+    plt.savefig(title)
 
-def draw_Data(G, width, height):
+def draw_Data(G, width, height, title):
     """
     Draw ther maze represented by the graph G
 
@@ -118,7 +120,7 @@ def draw_Data(G, width, height):
     """
 
     T = to_networkx(G, to_undirected=True, node_attrs=['pos'], edge_attrs=['edge_weight'])
-    draw_maze(T, width, height)
+    draw_maze(T, width, height, title)
 
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print('Using gpu: %s ' % torch.cuda.is_available())
@@ -294,20 +296,20 @@ class Network(nn.Module):
     
 print("Starting training")
 
-num_timesteps = 1000
+num_timesteps = 10
 time_emb_dim = 100
 batch_size = 2
 data_size = 10000
-num_gcn_layers = 3
-num_mlp1_layers = 2
-num_mlp2_layers = 2
+num_gcn_layers = 4
+num_mlp1_layers = 3
+num_mlp2_layers = 3
 
 graph_size = width * height
 
 network = Network(max_deg=4, num_gcn_layers=num_gcn_layers, num_mlp1_layers=num_mlp1_layers, num_mlp2_layers=num_mlp2_layers, time_emb_dim=time_emb_dim)
 
 model = D3PM(network, num_hops=num_gcn_layers, time_emb_dim=time_emb_dim, num_timesteps=num_timesteps, device=device)
-#model.load_state_dict(torch.load('model_weights2.pth', weights_only=True))
+model.load_state_dict(torch.load('model_weights2.pth', weights_only=True))
 
 train_loader = torch_geometric.loader.DataLoader(dataset[:data_size], batch_size=batch_size, shuffle=True)
 
@@ -376,3 +378,85 @@ ax[0].set_title("BCELoss")
 ax[1].plot(accs)
 ax[1].set_title("Accuracy")
 plt.savefig("prog.jpg")
+
+print("Training done")
+print("Starting generation")
+
+def num_squares(G):
+    res = 0
+    for v in range(G.number_of_nodes()):
+        for u, w in combinations(G[v], 2):
+            if u>v and w>v:
+                squares = len((set(G[u]) & set(G[w])) - {v})
+                res += squares
+    return res
+
+def cc_and_trees(G):
+    cc = nx.connected_components(G)
+    cc = list([c for c in cc if len(c)>1])
+    num_cc = len(cc)
+    tree_ratio = np.sum([nx.is_tree(G.subgraph(c))for c in cc])/num_cc
+
+    return num_cc, tree_ratio
+
+def analytics(data):
+    data2 = deepcopy(data)
+    data2.edge_index = torch.tensor([[data2.edge_index[0][i], data2.edge_index[1][i]] for i in range(data2.num_edges) if data2.edge_weight[i] == 1]).T
+    G = to_networkx(data2, to_undirected=True, node_attrs=['pos'], edge_attrs=['edge_weight'])
+
+    return *cc_and_trees(G), num_squares(G)
+
+G = nx.grid_2d_graph(width, height)
+nx.set_edge_attributes(G, {e:{"edge_weight":1.} for e in G.edges(data=False)})
+nx.set_node_attributes(G, {n:{'pos':n} for n in G.nodes(data=False)})
+data = from_networkx(G).to(device)
+data.batch = torch.zeros(data.num_nodes).long()
+data.edge_index, data.edge_weight = torch_geometric.utils.coalesce(edge_index=data.edge_index, edge_attr=data.edge_weight)
+data.edge_state = torch.hstack((data.edge_weight.unsqueeze(1), 1. - data.edge_weight.unsqueeze(1)))
+
+data = data.to(device)
+model.to(device)
+model.eval()
+t = torch.tensor([num_timesteps-1]).to(device)
+thresholds = torch.tensor([data.num_nodes - 1]).to(device)
+data.x = torch.arange(data.num_nodes).to(device).reshape(-1, 1).float()
+noise = model.add_noise(G_start=data, thresholds=thresholds, t=t)
+
+print("Initial graph")
+cc, tree_ratio, squares = analytics(data)
+print("Number of connected component: "+str(cc))
+print("Ratio of trees: "+str(tree_ratio))
+print("Number of squares: "+str(squares))
+draw_Data(data, width, height, "initial.jpg")
+
+print("Noise")
+cc, tree_ratio, squares = analytics(noise)
+print("Number of connected component: "+str(cc))
+print("Ratio of trees: "+str(tree_ratio))
+print("Number of squares: "+str(squares))
+draw_Data(noise, width, height, "noise.jpg")
+
+noise1 = deepcopy(noise)
+noise1.ptr = torch.tensor([0, noise1.num_nodes]).to(device)
+noise1.batch = torch.zeros(noise1.num_nodes).long().to(device)
+
+thresholds = torch.arange(0, noise1.num_nodes).flip(0).unsqueeze(1).to(device)
+
+for threshold in tqdm(thresholds):
+    for t in torch.arange(num_timesteps).flip(0).unsqueeze(1).to(device):
+        pred = model.reverse(noise1, threshold, t)
+
+        sample = torch.bernoulli(pred).long()
+        noise1.edge_state = F.one_hot( 1 - sample, num_classes=2).float()
+
+        undirected_indices = (noise1.edge_index[0] < noise1.edge_index[1]) * noise1.csr()[2] + (noise1.edge_index[0] >= noise1.edge_index[1]) * noise1.csc()[2] 
+        noise1.edge_state = noise1.edge_state[undirected_indices]
+
+        noise1.edge_weight = noise1.edge_state[:,0]
+
+print("Generated tree")
+cc, tree_ratio, squares = analytics(noise1)
+print("Number of connected component: "+str(cc))
+print("Ratio of trees: "+str(tree_ratio))
+print("Number of squares: "+str(squares))
+draw_Data(noise1, width, height, "generated.jpg")
