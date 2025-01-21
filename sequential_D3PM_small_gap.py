@@ -230,19 +230,20 @@ class D3PM(nn.Module):
         self.num_timesteps = num_timesteps
         self.time_emb_dim = time_emb_dim
         self.eps = torch.linspace(0, 0.5, self.num_timesteps).to(device)
-        self.time_emb = sinusoidal_embedding(self.num_timesteps, self.time_emb_dim).to(device)
+        self.eps = torch.cat((self.eps, torch.tensor([0.5]).to(device)))
+        self.time_emb = sinusoidal_embedding(self.num_timesteps+1, self.time_emb_dim).to(device)
 
     def add_noise(self, G_start, thresholds, t):
 
         noised_G = G_start.clone()
-        
-        epsilon = self.eps[t[noised_G.batch[noised_G.edge_index[0]]]]
+
         noised_indices = (noised_G.x[noised_G.edge_index[0]][:,0] < thresholds[noised_G.batch[noised_G.edge_index[0]]]) | (noised_G.x[noised_G.edge_index[1]][:,0] < thresholds[noised_G.batch[noised_G.edge_index[1]]])
+        epsilon = self.eps[t[noised_G.batch[noised_G.edge_index[0]]] + noised_indices.long()]
         
         p = (1 - epsilon) * noised_G.edge_state[:, 0] + epsilon * noised_G.edge_state[:, 1]
         sample = torch.bernoulli(p).long().to(device)
         
-        noised_G.edge_state[noised_indices] = F.one_hot(1 - sample, num_classes=2).to(torch.float32)[noised_indices]
+        noised_G.edge_state = F.one_hot(1 - sample, num_classes=2).to(torch.float32)
 
         undirected_indices = (noised_G.edge_index[0] < noised_G.edge_index[1]) * noised_G.csr()[2] + (noised_G.edge_index[0] >= noised_G.edge_index[1]) * noised_G.csc()[2] # To noise in a undirected way. 
         noised_G.edge_state[undirected_indices] = noised_G.edge_state[undirected_indices]
@@ -255,7 +256,7 @@ class D3PM(nn.Module):
         batch.x = F.one_hot((batch.x[:,0] < thresholds[batch.batch]).long(), num_classes=2).to(torch.float32)
         batch = self.edges_transform(batch)
 
-        batch.x = torch.cat([batch.x, self.time_emb[t[batch.batch]]*batch.x[:,1].unsqueeze(1)], dim=1)
+        batch.x = torch.cat([batch.x, self.time_emb[t[batch.batch] + batch.x[:,1].long()]], dim=1)
 
         pos = (torch.arange(batch.num_nodes, device=device) % batch.ptr[1]) % (2*self.num_hops)
         
@@ -378,7 +379,7 @@ ax[0].plot(losses)
 ax[0].set_title("BCELoss")
 ax[1].plot(accs)
 ax[1].set_title("Accuracy")
-plt.savefig("prog.jpg")
+plt.savefig("prog_sg.jpg")
 
 print("Training done")
 print("Starting generation")
@@ -428,14 +429,14 @@ cc, tree_ratio, squares = analytics(data)
 print("Number of connected component: "+str(cc))
 print("Ratio of trees: "+str(tree_ratio))
 print("Number of squares: "+str(squares))
-draw_Data(data, width, height, "initial.jpg")
+draw_Data(data, width, height, "initial_sg.jpg")
 
 print("Noise")
 cc, tree_ratio, squares = analytics(noise)
 print("Number of connected component: "+str(cc))
 print("Ratio of trees: "+str(tree_ratio))
 print("Number of squares: "+str(squares))
-draw_Data(noise, width, height, "noise.jpg")
+draw_Data(noise, width, height, "noise_sg.jpg")
 
 noise1 = deepcopy(noise)
 noise1.ptr = torch.tensor([0, noise1.num_nodes]).to(device)
@@ -444,8 +445,8 @@ noise1.batch = torch.zeros(noise1.num_nodes).long().to(device)
 thresholds = torch.arange(noise1.num_nodes).flip(0).unsqueeze(1).to(device)
 timesteps = torch.arange(num_timesteps).flip(0).unsqueeze(1).to(device)
 
-for threshold in thresholds:
-    for t in timesteps:
+for t in timesteps[:-1]:
+    for threshold in thresholds:
         pred = model.reverse(noise1, threshold, t)
 
         sample = torch.bernoulli(pred).long()
@@ -461,4 +462,4 @@ cc, tree_ratio, squares = analytics(noise1)
 print("Number of connected component: "+str(cc))
 print("Ratio of trees: "+str(tree_ratio))
 print("Number of squares: "+str(squares))
-draw_Data(noise1, width, height, "generated.jpg")
+draw_Data(noise1, width, height, "generated_sg.jpg")
