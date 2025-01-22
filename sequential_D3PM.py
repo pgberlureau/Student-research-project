@@ -299,7 +299,7 @@ print("Starting training")
 
 num_timesteps = 10
 time_emb_dim = 100
-batch_size = 1
+batch_size = 2
 data_size = 10000
 num_gcn_layers = 4
 num_mlp1_layers = 3
@@ -318,7 +318,7 @@ num_epochs = 100
 learning_rate = 0.001
 
 optimizer = torch.optim.Adam(network.parameters(), lr=learning_rate)
-scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=5, threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=0, eps=1e-08, verbose=False)
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer)
 loss_fn = torch.nn.BCELoss()
 
 losses = []
@@ -326,7 +326,7 @@ accs = []
 
 print(device)
 model.to(device)
-for epoch in tqdm(range(num_epochs)):
+for epoch in range(num_epochs):
         stdout.write(f"Epoch {epoch}")
         running_loss = 0.0
         running_acc = 0.0
@@ -360,13 +360,14 @@ for epoch in tqdm(range(num_epochs)):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                scheduler.step(loss)
 
                 running_loss += loss.item() / len(train_loader)
                 running_acc += torch.mean(((noise_pred > 0.5) == batch.edge_state[:,0]).float()).item() / len(train_loader)
                 
         losses.append(running_loss)
         accs.append(running_acc)
+
+        scheduler.step(running_loss)
         
         print("\tRunning loss: "+str(running_loss))
         print("\tRunning acc: "+str(running_acc))
