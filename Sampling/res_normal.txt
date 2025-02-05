@@ -1,0 +1,14 @@
+Training done
+Starting generation
+Initial graph
+Number of connected component: 1
+Ratio of trees: 0.0
+Number of squares: 961
+Noise
+Number of connected component: 2
+Ratio of trees: 0.5
+Number of squares: 280
+Generated tree
+Number of connected component: 36
+Ratio of trees: 0.8611111111111112
+Number of squares: 51

@@ -1,0 +1,16 @@
+Using gpu: True 
+Loaded dataset
+Training done
+Starting generation
+Initial graph
+Number of connected component: 1
+Ratio of trees: 1.0
+Number of squares: 0
+Noise
+Number of connected component: 35
+Ratio of trees: 0.7428571428571429
+Number of squares: 32
+Generated tree
+Number of connected component: 21
+Ratio of trees: 0.9047619047619048
+Number of squares: 3
