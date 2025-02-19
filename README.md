@@ -1,4 +1,4 @@
-# Uniform spanning tree sampling on grid graphs.
+# UST - D3PM.
 
 This repository contains the source code of my student research project. We adapt D3PMs for the task of uniform spanning tree sampling on a grid graph, proposing an autoregressive
 approach that iteratively refines the sampled edge set along a fixed node schedule.
