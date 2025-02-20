@@ -29,7 +29,7 @@ python train.py --model_path MODEL_PATH --dataset_path DATASET_PATH --curves_pat
 
 ### Arguments
 
-- `MODEL_PATH` is the path of the file in which the model should be stored (e.g models/model.pt).`
+- `MODEL_PATH` is the path of the file in which the model should be stored (e.g models/model.pt).
 - `DATASET_PATH` is the path of the dataset's root folder.
 - `CURVES_PATH` is the name of the image file featuring the loss and accuracy curves (e.g curves/curves.png).
 
