@@ -75,8 +75,8 @@ def sample_from_noise(noise, width, height, device, num_timesteps, model, varian
     timesteps = torch.arange(num_timesteps).flip(0).unsqueeze(1).to(device)
 
     if variant:
-        for threshold in thresholds:
-            for t in timesteps:
+        for i, threshold in enumerate(thresholds):
+            for idx, t in enumerate(timesteps):
                 pred = model.reverse(noise, threshold, t)
 
                 sample = torch.bernoulli(pred).long()
@@ -86,10 +86,15 @@ def sample_from_noise(noise, width, height, device, num_timesteps, model, varian
                 noise.edge_state = noise.edge_state[undirected_indices]
 
                 noise.edge_weight = noise.edge_state[:,0]
+
+                if idx+1 < len(timesteps):
+                    noise = model.add_noise(noise, threshold, timesteps[idx+1])
+                elif i+1 < len(thresholds):
+                    noise = model.add_noise(noise, thresholds[i+1], timesteps[0])
 
     else:
-        for t in timesteps:
-            for threshold in thresholds:
+        for i, t in enumerate(timesteps):
+            for idx, threshold in enumerate(thresholds):
                 pred = model.reverse(noise, threshold, t)
 
                 sample = torch.bernoulli(pred).long()
@@ -99,6 +104,11 @@ def sample_from_noise(noise, width, height, device, num_timesteps, model, varian
                 noise.edge_state = noise.edge_state[undirected_indices]
 
                 noise.edge_weight = noise.edge_state[:,0]
+
+                if idx+1 < len(thresholds):
+                    noise = model.add_noise(noise, thresholds[idx+1], t)
+                elif i+1 < len(timesteps):
+                    noise = model.add_noise(noise, thresholds[0], timesteps[i+1])
 
     if generated_stats:
         cc, tree_ratio, squares = analytics(noise)
